@@ -1,61 +1,79 @@
-from flask import request
-import uuid
-
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
-from db import products
+from db import db
 from schemas import ProductSchema, ProductUpdateSchema
-blueprint = Blueprint("product", __name__, description= "Operations on product")
+from models import ProductModel
+from sqlalchemy.exc import SQLAlchemyError,IntegrityError
+from flask_jwt_extended import jwt_required
+
+blueprint = Blueprint(
+    "product",
+    __name__,
+    description="Operations on product"
+)
 
 
 @blueprint.route("/products/<product_id>")
-
 class Shop(MethodView):
+    @jwt_required(fresh= True)
     @blueprint.response(200, ProductSchema)
     def get(self, product_id):
-        try:
-            return products[product_id]
-        except KeyError:
-            abort(404, message="Product not found")
-@blueprint.arguments(ProductUpdateSchema)         
-@blueprint.arguments(200,ProductSchema)
+        product = ProductModel.query.get_or_404(product_id)
+        return product
+    @jwt_required(fresh= True)
+    @blueprint.arguments(ProductUpdateSchema)
+    @blueprint.response(200, ProductSchema)
+    def put(self, product_data, product_id):
+        product = ProductModel.query.get_or_404(product_id)
 
-def put(self,product_data, product_id):
+        product.price = product_data["price"]
+        product.name = product_data["name"]
 
         try:
-            product = products[product_id]
-            product |= product_data
-            return product
-        except KeyError:
-            abort(404, message="Product not found")
+            db.session.add(product)
+            db.session.commit()
+        except SQLAlchemyError:
+            abort(500, message="Error while updating product")
 
-def delete(self, product_id):
+        return product
+    @jwt_required(fresh= True)
+    @blueprint.response(200)
+    def delete(self, product_id):
+        product = ProductModel.query.get_or_404(product_id)
+
+        db.session.delete(product)
+
         try:
-            del products[product_id]
-            return {"message": "Product deleted"}
-        except KeyError:
-            abort(404, message="Product not found")
+            db.session.commit()
+        except SQLAlchemyError:
+            abort(500, message="Error while deleting the product")
+
+        return {"message": "Product deleted"}
 
 
 @blueprint.route("/product")
 class ProductList(MethodView):
-    @blueprint.arguments(200, ProductSchema(many= True))
-
+    @jwt_required(fresh= True)
+    @blueprint.response(200, ProductSchema(many=True))
     def get(self):
-        return {"products": list(products.values())}, 200
+        return ProductModel.query.all()
+    @jwt_required(fresh= True)
+    @blueprint.arguments(ProductSchema)
+    @blueprint.response(201, ProductSchema)
+    def post(self, new_product):
+        product = ProductModel(**new_product)
 
-@blueprint.arguments(ProductSchema)
-@blueprint.arguments(201, ProductSchema)
-def post(self, new_product):
+        try:
+            db.session.add(product)
+            db.session.commit()
+        except IntegrityError:
+                    db.session.rollback()
+                    abort(400, message="A Product with that name already exists")
+        
+        except SQLAlchemyError:
+            abort(
+                500,
+                message="An error occurred while inserting the product"
+            )
 
-        for product in products.values():
-            if (
-                new_product["name"] == product["name"]
-                and new_product["shop_id"] == product["shop_id"]
-            ):
-                abort(400, message="Product already exists")
-
-        product_id = uuid.uuid4().hex
-        product = {**new_product, "id": product_id}
-        products[product_id] = product
         return product

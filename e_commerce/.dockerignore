@@ -1,0 +1,6 @@
+Core Basic/
+.venv/
+venv/
+*.pyc
+__pycache__/
+instance/

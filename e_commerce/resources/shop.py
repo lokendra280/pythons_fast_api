@@ -1,48 +1,71 @@
-from urllib import request
-import uuid
-
 from flask.views import MethodView
 from flask_smorest import Blueprint, abort
-from db import shops
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from flask_jwt_extended import jwt_required
+
+from models import ShopModel
+from db import db
 from schemas import ShopSchema
 
-blueprint = Blueprint("shops", __name__, description= "Operations on shops")
+
+blueprint = Blueprint(
+    "shops",
+    __name__,
+    description="Operations on shops"
+)
+
 
 @blueprint.route("/shop/<shop_id>")
 class Shop(MethodView):
-    @blueprint.argument(200, ShopSchema)
-    def get (self, shop_id):
+    @jwt_required(fresh= True)
+    @blueprint.response(200, ShopSchema)
+    def get(self, shop_id):
+        shop = ShopModel.query.get_or_404(shop_id)
+        return shop
+    @jwt_required(fresh= True)
+    @blueprint.response(200)
+    def delete(self, shop_id):
+        shop = ShopModel.query.get_or_404(shop_id)
+
+        db.session.delete(shop)
+
         try:
-            return shops[shop_id]
-        except KeyError:
-            abort(404, message="Shop not found")
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            abort(500, message="An error occurred while deleting the shop")
 
+        return {"message": "Shop deleted"}
 
-def delete(self, shop_id):
-    try:
-        del shops[shop_id]
-        return {"message": "shop deleted"}
-    except KeyError:
-        abort(404, message="Shop not found")
 
 @blueprint.route("/shop")
-
 class ShopList(MethodView):
-    @blueprint.argument(200, ShopSchema(many = True))
+    @jwt_required(fresh= True)
 
-    def get (self):
-            return {"shops": list(shops.values())}, 200
+    @blueprint.response(200, ShopSchema(many=True))
+    def get(self):
+        return ShopModel.query.all()
+    @jwt_required(fresh= True)
 
-@blueprint.arguments(ShopSchema)
-@blueprint.argument(201, ShopSchema)
+    @blueprint.arguments(ShopSchema)
+    @blueprint.response(201, ShopSchema)
+    def post(self, shop_data):
 
-def post(self,shop_data):
-      
-            for shop in shops.values():
-                 if shop_data["name"] == shop["name"]:
-                                      abort(400, message="Shop already exits")
+        shop = ShopModel(**shop_data)
 
-            shop_id = uuid.uuid4().hex
-            shop = {**shop_data, "id": shop_id}
-            shops[shop_id] = shop
-            return shop
+        try:
+            db.session.add(shop)
+            db.session.commit()
+
+        except IntegrityError:
+            db.session.rollback()
+            abort(400, message="A shop with that name already exists")
+
+        except SQLAlchemyError:
+            db.session.rollback()
+            abort(
+                500,
+                message="An error occurred while inserting the shop"
+            )
+
+        return shop
